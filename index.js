@@ -1,14 +1,16 @@
 // See https://github.com/dialogflow/dialogflow-fulfillment-nodejs
 // for Dialogflow fulfillment library docs, samples, and to report issues
 'use strict';
- 
+
 const functions = require('firebase-functions');
 const TogglClient = require('toggl-api');
 const toggl = new TogglClient({apiToken: 'ef7acf87b824051722093ff460c3183e'});
 const {WebhookClient} = require('dialogflow-fulfillment');
 const {Card, Suggestion} = require('dialogflow-fulfillment');
 const util = require('util');
- 
+const { extendMoment } = require('moment-range');
+const moment = extendMoment(require('moment'));
+
 process.env.DEBUG = 'dialogflow:debug'; // enables lib debugging statements
 
 const timeEntryDescription = 'Started by Google Assistant, dialogflow, and 7eggs';
@@ -49,6 +51,24 @@ function getRequestedTogglProject (project) {
   return { id, name };
 }
 
+function getTrayPeriods(today) {
+  const trayPeriods = [];
+  for (let startOfATwoWeekPeriod = moment('20190815');
+       startOfATwoWeekPeriod.isSameOrBefore(moment(today));
+       startOfATwoWeekPeriod.add(2, 'w')
+  ) {
+    trayPeriods.push(
+        moment.rangeFromInterval('week', 2, startOfATwoWeekPeriod)
+    );
+  }
+  return trayPeriods;
+}
+
+function getCurrentTrayPeriod(today) {
+  const periods = getTrayPeriods(today);
+  return periods[periods.length - 1];
+}
+
 async function handleStop(conv) {
   const responses = [];
 
@@ -76,10 +96,43 @@ async function handleStop(conv) {
   const { total_grand: totalMsToday, total_count } = await detailedReport({ workspace_id, since: todayInYYYYMMDD }).catch(console.error);
 
   if (total_count > 1) {
-    responses.push('Total time today: ' + renderDuration(totalMsToday));
+    responses.push(`Total time today: ${renderDuration(totalMsToday)}.`);
   }
 
-  conv.close(...responses);
+  await includeDailyAverage(responses, detailedReport);
+
+  console.log(responses.join(' '));
+  conv.close(responses.join(' '));
+}
+
+async function includeDailyAverage (responses, report) {
+  const currTrayPeriodStart = getCurrentTrayPeriod().start;
+  const daysElapsedInCurrTrayPeriod = moment().diff(currTrayPeriodStart, 'days');
+  console.log(13);
+  const { total_grand: totalMsClockedInTrayPeriod } = await report({
+    workspace_id,
+    since: currTrayPeriodStart.format('YYYY-MM-DD')
+  }).catch(console.error);
+  console.log(14, daysElapsedInCurrTrayPeriod);
+  console.log(15, totalMsClockedInTrayPeriod);
+
+  if (Number.isInteger(daysElapsedInCurrTrayPeriod) && Number.isFinite(totalMsClockedInTrayPeriod)) {
+    const roundTo2Dp = x => Math.round(x * 10) / 10;
+    const totalHoursClockedInTrayPeriod = moment.duration(totalMsClockedInTrayPeriod).asHours();
+    const dailyAverageHoursThisTrayPeriod = totalHoursClockedInTrayPeriod / daysElapsedInCurrTrayPeriod;
+    const dailyAverageHoursThisTrayPeriod2DP = roundTo2Dp(dailyAverageHoursThisTrayPeriod);
+    console.log(16, dailyAverageHoursThisTrayPeriod2DP);
+    if (dailyAverageHoursThisTrayPeriod2DP > 4) {
+      const daysLeftInCurrentTrayPeriod = 14 - daysElapsedInCurrTrayPeriod;
+      const dailyAverageHoursToBeMaintainedToCompensate = (4 * 14 - totalHoursClockedInTrayPeriod) / daysLeftInCurrentTrayPeriod;
+      const dailyAverageHoursToBeMaintainedToCompensate2DP = roundTo2Dp(dailyAverageHoursToBeMaintainedToCompensate);
+      console.log(17, dailyAverageHoursToBeMaintainedToCompensate2DP);
+      // responses.push(`Daily average trending high at ${dailyAverageHoursThisTrayPeriod2DP} hours. To compensate, aim for ${dailyAverageHoursToBeMaintainedToCompensate2DP} hours daily.`);
+      responses.push(`Aim for ${dailyAverageHoursToBeMaintainedToCompensate2DP} hours daily to stay on track.`);
+    } else {
+      console.log(18);
+    }
+  }
 }
 
 async function handleStart(conv, project) {
@@ -116,14 +169,17 @@ async function handleStart(conv, project) {
     workspace_id,
     since: todayInYYYYMMDD
   }).catch(console.error);
-  console.log(totalMsToday);
+  console.log(11, totalMsToday);
 
   if (totalMsToday) {
-    console.log(renderDuration(totalMsToday));
-    responses.push('Total time today: ' + renderDuration(totalMsToday));
+    console.log(12, renderDuration(totalMsToday));
+    responses.push(`Total time today: ${renderDuration(totalMsToday)}.`);
   }
 
-  conv.close(...responses);
+  await includeDailyAverage(responses, summaryReport);
+
+  console.log(responses.join(' '));
+  conv.close(responses.join(' '));
 }
 
 exports.handleStart = handleStart;
@@ -132,11 +188,11 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
   const agent = new WebhookClient({ request, response });
   console.log('Dialogflow Request headers: ' + JSON.stringify(request.headers));
   console.log('Dialogflow Request body: ' + JSON.stringify(request.body));
- 
+
   function welcome(agent) {
     agent.add(`Welcome to Aligners!`);
   }
- 
+
   function fallback(agent) {
     agent.add(`I didn't understand`);
     agent.add(`I'm sorry, can you try again?`);
