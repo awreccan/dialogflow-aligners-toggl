@@ -13,6 +13,7 @@ const moment = extendMoment(require('moment'));
 
 process.env.DEBUG = 'dialogflow:debug'; // enables lib debugging statements
 
+const STARTING_DATE_OF_A_TWO_WEEK_PERIOD = '20191112'
 const timeEntryDescription = 'Started by Google Assistant, dialogflow, and 7eggs';
 const workspace_id = 1011542;
 
@@ -53,7 +54,7 @@ function getRequestedTogglProject (project) {
 
 function getTrayPeriods(today) {
   const trayPeriods = [];
-  for (let startOfATwoWeekPeriod = moment('20190815');
+  for (let startOfATwoWeekPeriod = moment(STARTING_DATE_OF_A_TWO_WEEK_PERIOD);
        startOfATwoWeekPeriod.isSameOrBefore(moment(today));
        startOfATwoWeekPeriod.add(2, 'w')
   ) {
